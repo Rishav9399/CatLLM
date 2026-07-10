@@ -5,7 +5,6 @@ from typing import AsyncGenerator, List, Dict, Any, Optional
 import uuid
 import time  # For latency tracking
 import httpx
-# Revert to the stable synchronous import
 # pyrefly: ignore [missing-import]
 from duckduckgo_search import DDGS
 
@@ -19,26 +18,25 @@ from openai import AsyncOpenAI
 from app.database.models import ChatSession, Message
 from app.schemas.chat import MessageRole
 from app.services.vector_engine import EnterpriseVectorEngine
-from app.core.config import settings
 
-# --- ARCHITECTURAL ADDITION: The MCP Manager ---
-from app.services.mcp_manager import EnterpriseMCPManager
+# NOTE: We NO LONGER import EnterpriseMCPManager here!
+# The router injects it dynamically to prevent zombie processes.
 
 logger = logging.getLogger(__name__)
 
 class AgenticOrchestrator:
     """
     The Multi-Agent Swarm Cortex (Production Hardened).
-    Now equipped with a dynamic Peripheral Nervous System (MCP).
+    Now features: Traceability, Graceful Fallbacks, Hot-Swapping, and MCP Peripherals.
     """
-    def __init__(self, db_session: AsyncSession, vector_engine: EnterpriseVectorEngine):
+    # --- ARCHITECTURAL FIX 1: THE SOCKET (THE CATCHER) ---
+    # We added `mcp_manager` to the __init__ signature to catch the injected Singleton.
+    def __init__(self, db_session: AsyncSession, vector_engine: EnterpriseVectorEngine, mcp_manager):
         self.db = db_session
         self.vector_engine = vector_engine
+        self.mcp_manager = mcp_manager # Store the injected nervous system
         
-        # 1. Initialize the Peripheral Manager
-        self.mcp_manager = EnterpriseMCPManager() 
-        
-        # 2. The Gatekeeper
+        # 1. The Gatekeeper
         self.gatekeeper_client = AsyncOpenAI(
             base_url="https://api.groq.com/openai/v1",
             api_key=settings.GROQ_API_KEY,
@@ -46,7 +44,7 @@ class AgenticOrchestrator:
         )
         self.gatekeeper_model = "llama-3.1-8b-instant"
 
-        # 3. The Specialist Fleet
+        # 2. The Specialist Fleet
         self.specialists = {
             "RESEARCHER": {
                 "client": AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=settings.GROQ_API_KEY),
@@ -65,8 +63,7 @@ class AgenticOrchestrator:
             }
         }
 
-        # --- ARCHITECTURAL CHANGE: Renamed to base_tools ---
-        # These are our "Core/Native" tools that will ALWAYS exist.
+        # Renamed to base_tools to distinguish from dynamic MCP tools
         self.base_tools = [
             {
                 "type": "function",
@@ -116,7 +113,6 @@ class AgenticOrchestrator:
             .limit(limit)
         )
         messages = result.scalars().all()
-        # CRITICAL: Map internal "ai" role → OpenAI-standard "assistant".
         ROLE_MAP = {"ai": "assistant"}
         return [
             {"role": ROLE_MAP.get(msg.role.value, msg.role.value), "content": msg.content}
@@ -124,12 +120,8 @@ class AgenticOrchestrator:
         ]
 
     async def _triage_and_route(self, raw_query: str, history: List[Dict[str, str]], trace_id: str, attachments: Optional[List[str]] = None) -> Dict[str, str]:
-        """
-        AGENT 1: The Dispatcher
-        """
         start_time = time.time()
         
-        # Phase 3: VISIONARY shortcut
         if attachments and len(attachments) > 0:
             logger.info(f"[TRACE: {trace_id}] Image attachment detected. Routing directly to VISIONARY.")
             return {"clean_query": raw_query, "route": "VISIONARY"}
@@ -164,10 +156,8 @@ class AgenticOrchestrator:
             return {"clean_query": raw_query, "route": "RESEARCHER"}
 
     async def stream_agentic_response(self, session_id: uuid.UUID, user_query: str, attachments: Optional[List[str]] = None) -> AsyncGenerator[str, None]:
-        """The Autonomous Swarm Pipeline (Production Hardened)."""
         full_ai_response = ""
         cited_chunks = []
-        
         trace_id = str(uuid.uuid4())[:8]
         logger.info(f"[TRACE: {trace_id}] Initiating Swarm for Session {session_id}")
         
@@ -187,8 +177,8 @@ class AgenticOrchestrator:
             
             yield f"data: {json.dumps({'event': 'status', 'content': f'🚀 Routing to {route} Specialist ({expert_model})...'})}\n\n"
 
-            # --- ARCHITECTURAL ADDITION: Dynamic Tool Compilation ---
-            # We fetch dynamic tools and merge them with base tools right before inference
+            # --- DYNAMIC TOOL INJECTION ---
+            # Ask the MCP manager for any external tools and merge them with native tools
             mcp_tools = await self.mcp_manager.get_dynamic_tools()
             active_tools = self.base_tools + mcp_tools
 
@@ -233,7 +223,6 @@ class AgenticOrchestrator:
                     response = await expert_client.chat.completions.create(
                         model=expert_model,
                         messages=messages,
-                        # Pass combined tools, or None if the array is empty
                         tools=active_tools if len(active_tools) > 0 else None,
                         tool_choice="auto" if len(active_tools) > 0 else None,
                         temperature=0.1
@@ -251,55 +240,34 @@ class AgenticOrchestrator:
                     messages.append(response_message)
                     for tool_call in response_message.tool_calls:
                         tool_name = tool_call.function.name
-                        args = json.loads(tool_call.function.arguments)
+                        
+                        # --- ARCHITECTURAL FIX 2: DEFENSIVE PARSING ---
+                        # Prevent crashes if the LLM sends "null" for a zero-argument tool
+                        raw_args = tool_call.function.arguments
+                        try:
+                            args = json.loads(raw_args) if raw_args and raw_args.strip() else {}
+                            if not isinstance(args, dict):
+                                args = {}
+                        except Exception:
+                            args = {}
+                            
                         search_query = args.get("query", clean_query)
 
-                        # -------------------------------------------------------
-                        # NATIVE TOOL 1: Enterprise Knowledge Base
-                        # -------------------------------------------------------
                         if tool_name == "search_enterprise_knowledge":
                             logger.info(f"[TRACE: {trace_id}] Tool: KB Search for: '{search_query}'")
                             yield f"data: {json.dumps({'event': 'status', 'content': f'🔍 Searching knowledge base: {search_query}'})}\n\n"
-
                             retrieved_chunks = await self.vector_engine.hybrid_search_funnel(search_query, top_k=4)
-
                             if retrieved_chunks:
-                                tool_result_str = "\n\n---\n\n".join(
-                                    [f"[Source ID: {c['chunk_id']}]\n{c['content']}" for c in retrieved_chunks]
-                                )
+                                tool_result_str = "\n\n---\n\n".join([f"[Source ID: {c['chunk_id']}]\n{c['content']}" for c in retrieved_chunks])
                                 cited_chunks.extend([c['chunk_id'] for c in retrieved_chunks])
                             else:
                                 tool_result_str = "No relevant documents found in the enterprise knowledge base."
 
-                        # -------------------------------------------------------
-                        # NATIVE TOOL 2: Open Web Search
-                        # -------------------------------------------------------
                         elif tool_name == "search_the_open_web":
                             logger.info(f"[TRACE: {trace_id}] Tool: Web Search for: '{search_query}'")
                             yield f"data: {json.dumps({'event': 'status', 'content': f'🌐 Searching the web: {search_query}'})}\n\n"
-
                             try:
-                                if settings.BRAVE_API_KEY:
-                                    logger.info(f"[TRACE: {trace_id}] Using Enterprise Route: Brave Search API")
-                                    async with httpx.AsyncClient() as client:
-                                        resp = await client.get(
-                                            "https://api.search.brave.com/res/v1/web/search",
-                                            params={"q": search_query, "count": 3},
-                                            headers={
-                                                "Accept": "application/json",
-                                                "X-Subscription-Token": settings.BRAVE_API_KEY
-                                            },
-                                            timeout=10.0
-                                        )
-                                        resp.raise_for_status()
-                                        results = resp.json().get("web", {}).get("results", [])
-                                        if results:
-                                            tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('url', 'unknown')}]\n**{r.get('title', '')}**\n{r.get('description', '')}" for r in results])
-                                        else:
-                                            tool_result_str = "No web results found via Brave Search."
-
-                                elif settings.TAVILY_API_KEY:
-                                    logger.info(f"[TRACE: {trace_id}] Using Enterprise Route: Tavily Search API")
+                                if settings.TAVILY_API_KEY:
                                     async with httpx.AsyncClient() as client:
                                         resp = await client.post(
                                             "https://api.tavily.com/search",
@@ -308,42 +276,24 @@ class AgenticOrchestrator:
                                         )
                                         resp.raise_for_status()
                                         results = resp.json().get("results", [])
-                                        if results:
-                                            formatted = []
-                                            for r in results:
-                                                title = r.get('title', 'No title')
-                                                url = r.get('url', '')
-                                                body = r.get('content', '')[:400]
-                                                formatted.append(f"[Web: {url}]\n**{title}**\n{body}…")
-                                            tool_result_str = "\n\n---\n\n".join(formatted)
-                                        else:
-                                            tool_result_str = "No web results found via Tavily API."
+                                        tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('url', '')}]\n**{r.get('title', '')}**\n{r.get('content', '')[:400]}…" for r in results]) if results else "No web results found."
                                 else:
-                                    logger.info(f"[TRACE: {trace_id}] Using Fallback Route: DuckDuckGo Scraper")
                                     def fetch_ddg(q):
                                         with DDGS() as ddgs:
                                             return list(ddgs.text(q, max_results=3))
                                     results = await asyncio.to_thread(fetch_ddg, search_query)
-                                    if results:
-                                        tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('href', 'unknown')}]\n{r.get('title', '')}\n{r.get('body', '')}" for r in results])
-                                    else:
-                                        tool_result_str = "No web results found via Scraper."
+                                    tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('href', 'unknown')}]\n{r.get('title', '')}\n{r.get('body', '')}" for r in results]) if results else "No web results found."
                             except Exception as web_err:
                                 logger.error(f"[TRACE: {trace_id}] Web Search Failed: {web_err}")
                                 tool_result_str = "Web search encountered a network error or block. Proceed with existing knowledge."
                         
-                        # -------------------------------------------------------
-                        # ARCHITECTURAL ADDITION: DYNAMIC PERIPHERAL ROUTING
-                        # -------------------------------------------------------
                         else:
-                            # If it's not a native tool, it MUST be a peripheral tool.
+                            # --- PERIPHERAL EXECUTION ---
+                            # Hand it off to the external Python script
                             logger.info(f"[TRACE: {trace_id}] Accessing Peripheral: {tool_name}")
                             yield f"data: {json.dumps({'event': 'status', 'content': f'🔌 Accessing Peripheral: {tool_name}...'})}\n\n"
-                            
-                            # The MCP Manager handles the network boundary and returns the raw result
                             tool_result_str = await self.mcp_manager.execute_dynamic_tool(tool_name, args)
 
-                        # Append the result of whatever tool (Native or Dynamic) we just ran
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -353,9 +303,8 @@ class AgenticOrchestrator:
 
                     continue
                 else:
-                    break # ReAct finished. Proceed to generation.
+                    break 
             
-            # --- FINAL SYNTHESIS STREAM ---
             yield f"data: {json.dumps({'event': 'status', 'content': f'💡 Synthesizing ({route})...'})}\n\n"
             
             try:
