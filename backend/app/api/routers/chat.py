@@ -15,6 +15,9 @@ from app.schemas.chat import (
 from app.services.chat_orchestrator import AgenticOrchestrator
 from app.services.vector_engine import EnterpriseVectorEngine
 
+# --- ARCHITECTURAL FIX: IMPORT THE SINGLETON ---
+from app.services.mcp_manager import global_mcp_manager
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat & AI Operations"])
@@ -160,9 +163,16 @@ async def send_message(
     db.add(user_message)
     await db.commit()
 
-    orchestrator = AgenticOrchestrator(db_session=db, vector_engine=vector_engine_instance)
+    # --- ARCHITECTURAL FIX: DEPENDENCY INJECTION ---
+    # Instead of the orchestrator spawning a new manager (causing Zombies), 
+    # we inject the globally shared Singleton.
+    orchestrator = AgenticOrchestrator(
+        db_session=db, 
+        vector_engine=vector_engine_instance,
+        mcp_manager=global_mcp_manager
+    )
 
     return StreamingResponse(
         orchestrator.stream_agentic_response(session_id, payload.content, payload.attachments),
         media_type="text/event-stream"
-    )
+    )
