@@ -3,26 +3,37 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from app.database.core import engine, Base
 from app.api.routers import documents, chat
+
+# --- ARCHITECTURAL FIX: IMPORT THE MCP SINGLETON ---
+from app.services.mcp_manager import global_mcp_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- THE LIFESPAN MANAGER ---
-# This runs eactly once when the server starts, before accespting any traffic
+# This runs exactly once when the server starts, before accepting any traffic
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.info("Initializing Database Architecture...")
+    logger.info("Initializing Database Architecture...")
     # Instructs SQLAlchemy to physically build the tables based on our models.py
     async with engine.begin() as conn:
-        # Note: In a real production DB like PostgreSQL, you would use ALembic migraations instead of create_all()
+        # Note: In a real production DB like PostgreSQL, you would use Alembic migrations instead of create_all()
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database Architecture Locked.")
+    
+    # --- ARCHITECTURAL FIX: WARM UP THE NERVOUS SYSTEM ---
+    logger.info("Powering up Peripheral Nervous System (MCP)...")
+    await global_mcp_manager._init_peripherals()
+    
     yield
+    
     # Code here runs when the server is shutting down
-    logger.info("Swarm entering sleep mode.")
+    logger.info("Swarm entering sleep mode. Severing MCP connections...")
+    await global_mcp_manager.shutdown()
 
 app = FastAPI(
     title="LLM Production Grade",
@@ -44,7 +55,6 @@ app.include_router(documents.router)
 app.include_router(chat.router)
 
 # --- STATIC FILES FOR MULTIMODAL VISION ---
-import os
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
@@ -54,3 +64,4 @@ async def health_check():
         "status": "OK",
         "message": "System Healthy."
     }
+    
