@@ -1,41 +1,185 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ============================================================
+# RAG SYSTEM — Root .gitignore
+# Covers: Python/FastAPI backend + Next.js/React frontend
+# ============================================================
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
+# ============================================================
+# SECRETS — Never commit these. Ever.
+# ============================================================
+.env
+.env.local
+.env.*.local
+.env.production
 *.pem
+*.key
+secrets/
 
-# debug
+
+# ============================================================
+# PYTHON / BACKEND
+# ============================================================
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+
+# MyPy / type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# Ruff / linting cache
+.ruff_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# uv (fast Python package manager)
+.uv/
+
+
+# ============================================================
+# DATABASE — Generated at runtime, never commit
+# ============================================================
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+
+# ============================================================
+# VECTOR STORE — Qdrant on-disk storage
+# ============================================================
+qdrant_storage/
+# Also covers any future Chroma / FAISS on-disk stores
+chroma_storage/
+faiss_index/
+
+
+# ============================================================
+# UPLOADED DOCUMENTS — Runtime data, not source
+# ============================================================
+backend/uploads/
+uploads/
+
+
+# ============================================================
+# NODE / FRONTEND
+# ============================================================
+
+# Dependencies (always re-installable via npm install)
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Turbopack cache
+.turbo/
+
+# Vite cache
+.vite/
+
+# Build artifacts
+frontend/dist/
+frontend/build/
+
+# npm / yarn / pnpm lockfile variants
+# (keep package-lock.json or yarn.lock — whichever you use)
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+
+# ============================================================
+# IDE & EDITOR
+# ============================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains (PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.iws
+
+# Cursor
+.cursor/
+
+# Vim / Neovim
+*.swp
+*.swo
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+Session.vim
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+
+# ============================================================
+# LOGS
+# ============================================================
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
 
-# vercel
-.vercel
+# ============================================================
+# MISC
+# ============================================================
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# OS generated
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# Coverage reports
+coverage/
+lcov.info
+
+# Compiled binary addons (from node-gyp)
+build/Release
