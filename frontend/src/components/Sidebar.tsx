@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, MessageSquare, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, MessageSquare, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { getSessions, createChatSession } from '@/lib/api';
+import { getSessions, createChatSession, deleteChatSession } from '@/lib/api';
 import type { SessionPreview } from '@/types';
 
 interface SidebarProps {
@@ -90,6 +90,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId]);
 
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteChatSession(sessionId);
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      setTotal(t => Math.max(0, t - 1));
+      
+      // If we deleted the active session, reset state by calling onNewChat
+      if (sessionId === activeSessionId) {
+        onNewChat('');
+      }
+    } catch (err) {
+      console.error('[Sidebar] Failed to delete session:', err);
+    }
+  };
+
   return (
     <aside
       className={`
@@ -167,6 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               isActive={session.id === activeSessionId}
               isCollapsed={isCollapsed}
               onClick={() => onSessionSelect(session.id)}
+              onDelete={() => handleDeleteSession(session.id)}
             />
           ))}
 
@@ -199,15 +215,25 @@ const SessionItem = React.memo(function SessionItem({
   isActive,
   isCollapsed,
   onClick,
+  onDelete,
 }: {
   session: SessionPreview;
   isActive: boolean;
   isCollapsed: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className={`
         relative flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-left
         transition-all duration-300 group
@@ -225,20 +251,33 @@ const SessionItem = React.memo(function SessionItem({
       <MessageSquare size={14} strokeWidth={1.5} className="shrink-0" />
 
       {!isCollapsed && (
-        <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-light truncate leading-tight">
-            {session.title}
-          </p>
-          {session.preview ? (
-            <p className="text-[10px] text-gray-600 truncate mt-0.5 leading-tight">
-              {session.preview}
+        <>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-light truncate leading-tight">
+              {session.title}
             </p>
-          ) : null}
-          <p className="text-[9px] text-gray-700 font-mono mt-1">
-            {formatDistanceToNow(new Date(session.created_at), { addSuffix: true })}
-          </p>
-        </div>
+            {session.preview ? (
+              <p className="text-[10px] text-gray-600 truncate mt-0.5 leading-tight">
+                {session.preview}
+              </p>
+            ) : null}
+            <p className="text-[9px] text-gray-700 font-mono mt-1">
+              {formatDistanceToNow(new Date(session.created_at), { addSuffix: true })}
+            </p>
+          </div>
+          
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-white/[0.08] text-gray-500 hover:text-red-400 transition-all absolute right-2"
+            aria-label="Delete chat"
+          >
+            <Trash2 size={13} strokeWidth={1.5} />
+          </button>
+        </>
       )}
-    </button>
+    </div>
   );
 });

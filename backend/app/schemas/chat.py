@@ -14,6 +14,7 @@ class MessageRole(str, Enum):
 # 2. Incoming Data Contract
 class MessageCreate(BaseModel):
     content: str = Field(..., description="The user's raw input query")
+    attachments: Optional[List[str]] = Field(default=None, description="Optional local file paths for images")
 
 # 3. Outgoing Data Contract (For fetching chat history to the UI)
 class MessageResponse(BaseModel):
@@ -24,6 +25,7 @@ class MessageResponse(BaseModel):
     timestamp: datetime
     # Returns the chunk IDs used by the LLM so the UI can render citations
     citations_snapshot: Optional[Dict[str, Any]] = None 
+    attachments: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

@@ -87,5 +87,8 @@ class Message(Base):
     # we store a snapshot of the cited chunk IDs and brief context as JSON. 
     # This prevents heavy JOINs every time we load chat history.
     citations_snapshot: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    
+    # Phase 3: Multimodal Vision Attachments
+    attachments: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")

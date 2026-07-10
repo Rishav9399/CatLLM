@@ -6,6 +6,7 @@ export interface Message {
     content: string;
     statusText?: string;
     isStreaming?: boolean;
+    attachments?: string[];
 }
 
 // ----- Session types (used by Sidebar) -----
@@ -30,6 +31,7 @@ export interface SessionMessage {
     role: 'user' | 'ai';
     content: string;
     timestamp: string;
+    attachments?: string[];
 }
 
 export interface SessionDetailResponse {

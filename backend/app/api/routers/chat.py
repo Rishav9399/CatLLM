@@ -36,6 +36,27 @@ async def create_chat_session(db: AsyncSession = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
+# DELETE /sessions/{session_id} — Delete a chat session
+# ---------------------------------------------------------------------------
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_chat_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Purges a session and all its associated messages.
+    Leverages SQLAlchemy cascade rules defined in models.py.
+    """
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    
+    await db.delete(session)
+    await db.commit()
+    return None
+
+
+# ---------------------------------------------------------------------------
 # GET /sessions — Paginated session list for the sidebar
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionListResponse)
@@ -110,6 +131,7 @@ async def get_chat_session(
                 content=msg.content,
                 timestamp=msg.timestamp,
                 citations_snapshot=msg.citations_snapshot,
+                attachments=msg.attachments,
             )
             for msg in sorted_messages
         ],
@@ -129,13 +151,18 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    user_message = Message(session_id=session_id, role=MessageRole.USER, content=payload.content)
+    user_message = Message(
+        session_id=session_id, 
+        role=MessageRole.USER, 
+        content=payload.content,
+        attachments=payload.attachments
+    )
     db.add(user_message)
     await db.commit()
 
     orchestrator = AgenticOrchestrator(db_session=db, vector_engine=vector_engine_instance)
 
     return StreamingResponse(
-        orchestrator.stream_agentic_response(session_id, payload.content),
+        orchestrator.stream_agentic_response(session_id, payload.content, payload.attachments),
         media_type="text/event-stream"
     )

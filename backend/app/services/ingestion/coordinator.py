@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.core import AsyncSessionLocal
 from app.database.models import Document, Chunk, DocumentStatus
 from app.services.ingestion.pdf_parser import PDFLayoutParser
+from app.services.vector_engine import EnterpriseVectorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,25 @@ async def process_document_pipeline(document_id: uuid.UUID, file_path: str, orig
             )
             await db.commit()
             logger.info(f"Successfully parsed {len(db_chunks)} chunks for {original_filename}")
+
+            # 6. Ingest into Vector Engine
+            # Re-map chunks to include the DB document_id for the vector payload
+            for item in chunks_data:
+                item["document_id"] = str(document_id)
+
+            vector_engine = EnterpriseVectorEngine()
+            
+            # Run the CPU/GPU heavy embedding process in a background thread
+            await asyncio.to_thread(vector_engine.ingest_chunks, chunks_data)
+            
+            # 7. Update status to READY
+            await db.execute(
+                update(Document)
+                .where(Document.id == document_id)
+                .values(status=DocumentStatus.READY)
+            )
+            await db.commit()
+            logger.info(f"Successfully ingested {len(db_chunks)} chunks into Vector DB for {original_filename}")
 
         except Exception as e:
             logger.error(f"Failed to process document {document_id}: {str(e)}")

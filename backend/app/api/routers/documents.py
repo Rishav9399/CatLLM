@@ -7,6 +7,7 @@ import shutil
 
 from app.database.core import get_db
 from app.database.models import Document, DocumentCategory, DocumentStatus
+from app.services.ingestion.coordinator import process_document_pipeline
 from app.services.ingestion.pdf_parser import PDFLayoutParser
 
 router = APIRouter(
@@ -17,6 +18,9 @@ router = APIRouter(
 # Ensure our upload directory exists
 UPLOAD_DIR = "./uploads/raw_documents"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+IMAGE_UPLOAD_DIR = "./uploads/images"
+os.makedirs(IMAGE_UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload")
 async def upload_document(
@@ -69,14 +73,30 @@ async def upload_document(
         "status": new_doc.status
     }
 
-async def process_document_pipeline(document_id: uuid.UUID, file_path: str, original_filename: str):
+@router.post("/upload_image")
+async def upload_image(file: UploadFile = File(...)):
     """
-    This is a stub for our Coordinator Service. 
-    It will update the DB status to PARSING, instantiate the PDFLayoutParser 
-    from our Canvas, get the chunks, and save them to the database.
+    HTTP Transport Layer: Receives an image, saves it to the local uploads directory, 
+    and returns the file path for the Swarm to attach.
     """
-    print(f"--- Background worker started for {original_filename} ---")
-    
-    # In the next step, we will wire this function to actually instantiate 
-    # the PDFLayoutParser from our Canvas and save the returned chunks to the DB!
-    pass
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="Only image files are allowed.")
+
+    # 1. Generate a secure, unique filename
+    secure_filename = f"{uuid.uuid4()}_{file.filename}"
+    file_path = os.path.join(IMAGE_UPLOAD_DIR, secure_filename)
+
+    # 2. Stream to disk asynchronously
+    try:
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await out_file.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
+
+    # We return the URL path that the frontend can use to display it,
+    # which is also the exact relative path the backend will read from disk.
+    return {
+        "file_path": f"/uploads/images/{secure_filename}"
+    }
+

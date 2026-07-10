@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator, List, Dict, Any, Optional
 import uuid
 import time  # For latency tracking
 import httpx
@@ -116,11 +116,17 @@ class AgenticOrchestrator:
             for msg in reversed(messages)
         ]
 
-    async def _triage_and_route(self, raw_query: str, history: List[Dict[str, str]], trace_id: str) -> Dict[str, str]:
+    async def _triage_and_route(self, raw_query: str, history: List[Dict[str, str]], trace_id: str, attachments: Optional[List[str]] = None) -> Dict[str, str]:
         """
         AGENT 1: The Dispatcher (Now with Confidence & Fallback)
         """
         start_time = time.time()
+        
+        # Phase 3: VISIONARY shortcut
+        if attachments and len(attachments) > 0:
+            logger.info(f"[TRACE: {trace_id}] Image attachment detected. Routing directly to VISIONARY.")
+            return {"clean_query": raw_query, "route": "VISIONARY"}
+            
         history_context = str(history[-2:]) if history else "No history."
             
         system_prompt = (
@@ -152,7 +158,7 @@ class AgenticOrchestrator:
             logger.error(f"[TRACE: {trace_id}] Router Failed: {e}. Defaulting to RESEARCHER.")
             return {"clean_query": raw_query, "route": "RESEARCHER"}
 
-    async def stream_agentic_response(self, session_id: uuid.UUID, user_query: str) -> AsyncGenerator[str, None]:
+    async def stream_agentic_response(self, session_id: uuid.UUID, user_query: str, attachments: Optional[List[str]] = None) -> AsyncGenerator[str, None]:
         """The Autonomous Swarm Pipeline (Production Hardened)."""
         full_ai_response = ""
         cited_chunks = []
@@ -166,7 +172,7 @@ class AgenticOrchestrator:
             history = await self._get_chat_history(session_id)
             
             yield f"data: {json.dumps({'event': 'status', 'content': '⚡ Dispatcher analyzing intent...'})}\n\n"
-            dispatch_decision = await self._triage_and_route(user_query, history, trace_id)
+            dispatch_decision = await self._triage_and_route(user_query, history, trace_id, attachments)
             clean_query = dispatch_decision.get("clean_query", user_query)
             route = dispatch_decision.get("route", "RESEARCHER")
             
@@ -181,14 +187,39 @@ class AgenticOrchestrator:
             system_prompt = (
                 f"You are the {route} Specialist Architect in an enterprise AI Swarm. "
                 "You have access to two tools. Follow this strict routing hierarchy:\n"
-                "1. ALWAYS call search_enterprise_knowledge first for any domain-specific or company-related question.\n"
+                "0. CASUAL CHIT-CHAT BYPASS: If the user simply says hello, greets you, or makes casual small talk, DO NOT invoke any tools. Respond directly, conversationally, and warmly in character.\n"
+                "1. ALWAYS call search_enterprise_knowledge first for any domain-specific, factual, or company-related question.\n"
                 "2. ONLY call search_the_open_web if the enterprise database returns nothing, "
                 "OR if the user explicitly asks about current events, real-time data, or public news.\n"
                 "3. Never call search_the_open_web as a first resort — the private knowledge base takes priority.\n"
                 "When citing enterprise sources, use [Source ID: X]. "
                 "When citing web sources, use [Web: <URL>]."
             )
-            messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": clean_query}]
+            
+            user_message_payload: Dict[str, Any] = {"role": "user"}
+            if attachments and len(attachments) > 0:
+                import base64
+                # Convert '/uploads/images/...' to local relative path './uploads/images/...'
+                file_path = "." + attachments[0] 
+                try:
+                    with open(file_path, "rb") as image_file:
+                        base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+                    user_message_payload["content"] = [
+                        {"type": "text", "text": clean_query},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                except Exception as e:
+                    logger.error(f"[TRACE: {trace_id}] Failed to read image for vision cortex: {e}")
+                    user_message_payload["content"] = clean_query
+            else:
+                user_message_payload["content"] = clean_query
+                
+            messages = [{"role": "system", "content": system_prompt}] + history + [user_message_payload]
             
             # --- ReAct LOOP ---
             for loop_iteration in range(3):

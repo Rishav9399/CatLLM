@@ -25,6 +25,17 @@ export async function createChatSession(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// deleteChatSession
+// DELETE /api/v1/chat/sessions/{id}
+// ---------------------------------------------------------------------------
+export async function deleteChatSession(id: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/api/v1/chat/sessions/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`);
+}
+
+// ---------------------------------------------------------------------------
 // getSessions
 // GET /api/v1/chat/sessions?limit=20&offset=0
 // ---------------------------------------------------------------------------
@@ -56,13 +67,14 @@ export async function getSession(id: string): Promise<SessionDetailResponse> {
 export async function* streamMessage(
   sessionId: string,
   content: string,
+  attachments?: string[]
 ): AsyncGenerator<SSEEvent> {
   const res = await fetch(
     `${BACKEND_URL}/api/v1/chat/sessions/${sessionId}/message`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachments }),
     },
   );
 
@@ -109,6 +121,29 @@ export async function uploadDocument(
   form.append('file', file);
 
   const res = await fetch(`${BACKEND_URL}/api/v1/documents/upload`, {
+    method: 'POST',
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? `Upload failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// uploadImage
+// POST /api/v1/documents/upload_image  → { file_path }
+// ---------------------------------------------------------------------------
+export async function uploadImage(
+  file: File,
+): Promise<{ file_path: string }> {
+  const form = new FormData();
+  form.append('file', file);
+
+  const res = await fetch(`${BACKEND_URL}/api/v1/documents/upload_image`, {
     method: 'POST',
     body: form,
   });

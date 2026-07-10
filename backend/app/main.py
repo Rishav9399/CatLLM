@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -41,6 +42,11 @@ app.add_middleware(
 # --- ROUTER REGISTRATION ---
 app.include_router(documents.router)
 app.include_router(chat.router)
+
+# --- STATIC FILES FOR MULTIMODAL VISION ---
+import os
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/health", tags=["System"])
 async def health_check():

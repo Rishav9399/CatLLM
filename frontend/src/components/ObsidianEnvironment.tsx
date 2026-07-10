@@ -63,13 +63,13 @@ export default function ObsidianEnvironment() {
   }, []);
 
   // --- Send message ---
-  const handleInteraction = useCallback(async (query: string) => {
+  const handleInteraction = useCallback(async (query: string, attachments?: string[]) => {
     if (!query.trim() || isStreaming) return;
     setIsStreaming(true);
 
     // 1. User message materializes immediately
     const userMsgId = uuidv4();
-    setMessages(prev => [...prev, { id: userMsgId, role: 'user', content: query }]);
+    setMessages(prev => [...prev, { id: userMsgId, role: 'user', content: query, attachments }]);
 
     // 2. Ensure we have a session — create one lazily on the first message
     let currentSessionId = sessionId;
@@ -101,7 +101,7 @@ export default function ObsidianEnvironment() {
 
     try {
       let accumulated = '';
-      for await (const payload of streamMessage(currentSessionId, query)) {
+      for await (const payload of streamMessage(currentSessionId, query, attachments)) {
         if (payload.event === 'status') {
           patch(aiMsgId, { statusText: payload.content });
         } else if (payload.event === 'token') {

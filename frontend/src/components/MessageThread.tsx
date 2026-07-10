@@ -60,8 +60,20 @@ export const MessageThread = React.memo(function MessageThread({ messages }: Mes
               {msg.content && (
                 msg.role === 'user' ? (
                   // User messages: plain etched text, recedes into glass
-                  <div className="text-[13px] text-gray-500 leading-[1.9] tracking-[0.015em] font-light antialiased">
-                    {msg.content}
+                  <div className="text-[13px] text-gray-500 leading-[1.9] tracking-[0.015em] font-light antialiased flex flex-col gap-3">
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="flex gap-2 flex-wrap">
+                        {msg.attachments.map((url, idx) => (
+                          <img 
+                            key={idx} 
+                            src={`http://localhost:8000${url}`} 
+                            alt="Attachment" 
+                            className="w-48 h-auto rounded-lg border border-white/[0.05] opacity-80" 
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <div>{msg.content}</div>
                   </div>
                 ) : (
                   // AI messages: markdown rendered inside Obsidian typography
