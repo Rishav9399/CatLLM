@@ -3,7 +3,9 @@ import json
 import logging
 from typing import AsyncGenerator, List, Dict, Any
 import uuid
-import time # ARCHITECTURAL ADDITION: For latency tracking
+import time  # For latency tracking
+# pyrefly: ignore [missing-import]
+from duckduckgo_search import DDGS
 
 from app.core.config import settings
 
@@ -60,11 +62,35 @@ class AgenticOrchestrator:
                 "type": "function",
                 "function": {
                     "name": "search_enterprise_knowledge",
-                    "description": "Searches the company's hybrid vector/sparse database. Use this for factual company data.",
+                    "description": (
+                        "Searches the company's private hybrid vector/sparse knowledge base. "
+                        "ALWAYS call this tool first for any question about company data, "
+                        "internal policies, documents, or domain-specific knowledge."
+                    ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "query": {"type": "string", "description": "Specific search query."}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_the_open_web",
+                    "description": (
+                        "Searches the public internet via DuckDuckGo. "
+                        "ONLY use this tool if: (1) the enterprise knowledge base returned no results, "
+                        "OR (2) the user explicitly asks about recent news, current events, "
+                        "or real-time information that cannot be in a private database. "
+                        "Do NOT use this as a first resort."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Web search query."}
                         },
                         "required": ["query"]
                     }
@@ -151,8 +177,14 @@ class AgenticOrchestrator:
             yield f"data: {json.dumps({'event': 'status', 'content': f'🚀 Routing to {route} Specialist ({expert_model})...'})}\n\n"
 
             system_prompt = (
-                f"You are the {route} Specialist Architect. You have access to a hybrid knowledge base tool. "
-                "If they ask about company data, YOU MUST USE THE TOOL. Cite sources like [Source ID: X]."
+                f"You are the {route} Specialist Architect in an enterprise AI Swarm. "
+                "You have access to two tools. Follow this strict routing hierarchy:\n"
+                "1. ALWAYS call search_enterprise_knowledge first for any domain-specific or company-related question.\n"
+                "2. ONLY call search_the_open_web if the enterprise database returns nothing, "
+                "OR if the user explicitly asks about current events, real-time data, or public news.\n"
+                "3. Never call search_the_open_web as a first resort — the private knowledge base takes priority.\n"
+                "When citing enterprise sources, use [Source ID: X]. "
+                "When citing web sources, use [Web: <URL>]."
             )
             messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": clean_query}]
             
@@ -182,27 +214,74 @@ class AgenticOrchestrator:
                 if response_message.tool_calls:
                     messages.append(response_message)
                     for tool_call in response_message.tool_calls:
-                        if tool_call.function.name == "search_enterprise_knowledge":
-                            args = json.loads(tool_call.function.arguments)
-                            search_query = args.get("query", clean_query)
-                            
-                            logger.info(f"[TRACE: {trace_id}] Executing DB Search for: {search_query}")
-                            yield f"data: {json.dumps({'event': 'status', 'content': f'🔍 Executing Search: {search_query}'})}\n\n"
-                            
+                        tool_name = tool_call.function.name
+                        args = json.loads(tool_call.function.arguments)
+                        search_query = args.get("query", clean_query)
+
+                        # -------------------------------------------------------
+                        # TOOL: Enterprise Knowledge Base (private RAG)
+                        # -------------------------------------------------------
+                        if tool_name == "search_enterprise_knowledge":
+                            logger.info(f"[TRACE: {trace_id}] Tool: KB Search for: '{search_query}'")
+                            yield f"data: {json.dumps({'event': 'status', 'content': f'🔍 Searching knowledge base: {search_query}'})}\n\n"
+
                             retrieved_chunks = await self.vector_engine.hybrid_search_funnel(search_query, top_k=4)
-                            
+
                             if retrieved_chunks:
-                                tool_result_str = "\n\n---\n\n".join([f"[Source ID: {c['chunk_id']}]\n{c['content']}" for c in retrieved_chunks])
+                                tool_result_str = "\n\n---\n\n".join(
+                                    [f"[Source ID: {c['chunk_id']}]\n{c['content']}" for c in retrieved_chunks]
+                                )
                                 cited_chunks.extend([c['chunk_id'] for c in retrieved_chunks])
                             else:
-                                tool_result_str = "No relevant documents found."
-                                
+                                tool_result_str = "No relevant documents found in the enterprise knowledge base."
+
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
-                                "name": tool_call.function.name,
+                                "name": tool_name,
                                 "content": tool_result_str
                             })
+
+                        # -------------------------------------------------------
+                        # TOOL: Open Web Search (DuckDuckGo fallback)
+                        # Safety rules:
+                        #   - Top 3 results only (prevent context flood)
+                        #   - 400 chars per result (prevent context window degradation)
+                        #   - Runs in a thread (DDGS is synchronous/blocking)
+                        # -------------------------------------------------------
+                        elif tool_name == "search_the_open_web":
+                            logger.info(f"[TRACE: {trace_id}] Tool: Web Search for: '{search_query}'")
+                            yield f"data: {json.dumps({'event': 'status', 'content': f'🌐 Searching the web: {search_query}'})}\n\n"
+
+                            try:
+                                def _ddg_search(q: str):
+                                    with DDGS() as ddgs:
+                                        return list(ddgs.text(q, max_results=3))
+
+                                web_results = await asyncio.to_thread(_ddg_search, search_query)
+
+                                if web_results:
+                                    formatted = []
+                                    for r in web_results:
+                                        title = r.get('title', 'No title')
+                                        url   = r.get('href', '')
+                                        body  = r.get('body', '')[:400]  # Hard cap: 400 chars
+                                        formatted.append(f"[Web: {url}]\n**{title}**\n{body}…")
+                                    tool_result_str = "\n\n---\n\n".join(formatted)
+                                else:
+                                    tool_result_str = "No web results found."
+
+                            except Exception as web_err:
+                                logger.error(f"[TRACE: {trace_id}] Web search failed: {web_err}")
+                                tool_result_str = "Web search temporarily unavailable."
+
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "name": tool_name,
+                                "content": tool_result_str
+                            })
+
                     continue
                 else:
                     break # ReAct finished. Proceed to generation.
