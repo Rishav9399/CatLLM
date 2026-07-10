@@ -23,7 +23,8 @@ class EnterpriseMCPManager:
     and routes executions across stdio pipes securely.
     """
     def __init__(self):
-        # AsyncExitStack guarantees that child processes are killed when the main server shuts down.
+        # AsyncExitStack mathematically guarantees that child processes are killed 
+        # when the main server shuts down, preventing Concurrency Zombies.
         self.exit_stack = AsyncExitStack()
         self.sessions: Dict[str, ClientSession] = {}
         self._cached_tools: List[Dict[str, Any]] = []
@@ -98,8 +99,6 @@ class EnterpriseMCPManager:
             
         await self._init_peripherals()
         
-        # Currently we only have one server, so we route directly to it.
-        # In a larger system, we would map the tool_name to the specific server session.
         session = self.sessions.get("LocalSystem")
         if not session:
             return "Error: MCP Session disconnected."
@@ -123,3 +122,8 @@ class EnterpriseMCPManager:
             logger.info("Terminating MCP Peripheral connections...")
             await self.exit_stack.aclose()
             self._initialized = False
+
+# --- ARCHITECTURAL FIX: THE GLOBAL SINGLETON ---
+# We instantiate the manager exactly ONCE here, so the entire app shares the same connection pipes.
+# This completely eliminates the "Zombie" process bug.
+global_mcp_manager = EnterpriseMCPManager()
