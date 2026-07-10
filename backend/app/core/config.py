@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # but we define then here so Pydantic knows to look for them in the .env file
     GEMINI_API_KEY: Optional[str] = None
     GLM_API_KEY: Optional[str] = None
+    
+    # Search API Keys
+    TAVILY_API_KEY: Optional[str] = None
+    BRAVE_API_KEY: Optional[str] = None
 
     # Tells Pydantic to read from a local .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

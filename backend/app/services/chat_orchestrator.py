@@ -4,6 +4,8 @@ import logging
 from typing import AsyncGenerator, List, Dict, Any
 import uuid
 import time  # For latency tracking
+import httpx
+# Revert to the stable synchronous import
 # pyrefly: ignore [missing-import]
 from duckduckgo_search import DDGS
 
@@ -254,26 +256,69 @@ class AgenticOrchestrator:
                             yield f"data: {json.dumps({'event': 'status', 'content': f'🌐 Searching the web: {search_query}'})}\n\n"
 
                             try:
-                                def _ddg_search(q: str):
-                                    with DDGS() as ddgs:
-                                        return list(ddgs.text(q, max_results=3))
+                                # The Architect's Switch: Brave API vs Tavily vs Scraper
+                                if settings.BRAVE_API_KEY:
+                                    logger.info(f"[TRACE: {trace_id}] Using Enterprise Route: Brave Search API")
+                                    # Enterprise Free-Tier Standard: Brave Search API
+                                    async with httpx.AsyncClient() as client:
+                                        resp = await client.get(
+                                            "https://api.search.brave.com/res/v1/web/search",
+                                            params={"q": search_query, "count": 3},
+                                            headers={
+                                                "Accept": "application/json",
+                                                "X-Subscription-Token": settings.BRAVE_API_KEY
+                                            },
+                                            timeout=10.0
+                                        )
+                                        resp.raise_for_status()
+                                        
+                                        # Brave nests its results inside a 'web' -> 'results' object
+                                        results = resp.json().get("web", {}).get("results", [])
+                                        
+                                        if results:
+                                            # Brave uses 'description' instead of 'content' or 'body'
+                                            tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('url', 'unknown')}]\n**{r.get('title', '')}**\n{r.get('description', '')}" for r in results])
+                                        else:
+                                            tool_result_str = "No web results found via Brave Search."
 
-                                web_results = await asyncio.to_thread(_ddg_search, search_query)
-
-                                if web_results:
-                                    formatted = []
-                                    for r in web_results:
-                                        title = r.get('title', 'No title')
-                                        url   = r.get('href', '')
-                                        body  = r.get('body', '')[:400]  # Hard cap: 400 chars
-                                        formatted.append(f"[Web: {url}]\n**{title}**\n{body}…")
-                                    tool_result_str = "\n\n---\n\n".join(formatted)
+                                elif settings.TAVILY_API_KEY:
+                                    logger.info(f"[TRACE: {trace_id}] Using Enterprise Route: Tavily Search API")
+                                    async with httpx.AsyncClient() as client:
+                                        resp = await client.post(
+                                            "https://api.tavily.com/search",
+                                            json={"api_key": settings.TAVILY_API_KEY, "query": search_query, "max_results": 3},
+                                            timeout=10.0
+                                        )
+                                        resp.raise_for_status()
+                                        results = resp.json().get("results", [])
+                                        if results:
+                                            formatted = []
+                                            for r in results:
+                                                title = r.get('title', 'No title')
+                                                url = r.get('url', '')
+                                                body = r.get('content', '')[:400]
+                                                formatted.append(f"[Web: {url}]\n**{title}**\n{body}…")
+                                            tool_result_str = "\n\n---\n\n".join(formatted)
+                                        else:
+                                            tool_result_str = "No web results found via Tavily API."
+                                            
                                 else:
-                                    tool_result_str = "No web results found."
+                                    logger.info(f"[TRACE: {trace_id}] Using Fallback Route: DuckDuckGo Scraper")
+                                    # Fallback: Synchronous DDGS wrapped in a thread to prevent blocking
+                                    def fetch_ddg(q):
+                                        with DDGS() as ddgs:
+                                            return list(ddgs.text(q, max_results=3))
+                                            
+                                    results = await asyncio.to_thread(fetch_ddg, search_query)
+                                    
+                                    if results:
+                                        tool_result_str = "\n\n---\n\n".join([f"[Web: {r.get('href', 'unknown')}]\n{r.get('title', '')}\n{r.get('body', '')}" for r in results])
+                                    else:
+                                        tool_result_str = "No web results found via Scraper."
 
                             except Exception as web_err:
-                                logger.error(f"[TRACE: {trace_id}] Web search failed: {web_err}")
-                                tool_result_str = "Web search temporarily unavailable."
+                                logger.error(f"[TRACE: {trace_id}] Web Search Failed: {web_err}")
+                                tool_result_str = "Web search encountered a network error or block. Proceed with existing knowledge."
 
                             messages.append({
                                 "role": "tool",
