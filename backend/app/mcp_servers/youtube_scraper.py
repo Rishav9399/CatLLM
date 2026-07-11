@@ -28,20 +28,30 @@ def fetch_youtube_transcript(video_url: str) -> str:
         if not video_id:
             return "Error: Could not extract a valid YouTube video ID from the provided URL."
 
-        # 2. Fetch the transcript from YouTube's API
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        # 2. Fetch the transcript from YouTube's API (Robust Mode)
+        # This handles auto-generated captions and different languages
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # Try to get English first, if not, grab whatever the first available language is
+        try:
+            transcript = transcript_list.find_transcript(['en'])
+        except Exception:
+            # Fallback to the first available transcript (often auto-generated)
+            transcript = next(iter(transcript_list))
+            
+        fetched_data = transcript.fetch()
         
         # 3. Combine the text blocks
-        full_text = " ".join([t['text'] for t in transcript_list])
+        full_text = " ".join([t['text'] for t in fetched_data])
         
         # 4. Context Window Protection (Cap at ~15,000 characters)
         if len(full_text) > 15000:
             full_text = full_text[:15000] + "\n\n... [TRUNCATED FOR CONTEXT SIZE]"
             
-        return f"Transcript for Video {video_id}:\n{full_text}"
+        return f"Transcript for Video {video_id} (Language: {transcript.language}):\n{full_text}"
         
     except Exception as e:
-        return f"Error fetching transcript: {str(e)}. The video might not have closed captions enabled."
+        return f"Error fetching transcript: {str(e)}. The video might be private, age-restricted, or have zero closed captions available."
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
