@@ -19,24 +19,29 @@ except ImportError:
 class EnterpriseMCPManager:
     """
     The Peripheral Nervous System.
-    Spawns child processes for MCP servers, maps their tools to the OpenAI contract,
+    Spawns MULTIPLE child processes for MCP servers, maps their tools to the OpenAI contract,
     and routes executions across stdio pipes securely.
     """
     def __init__(self):
-        # AsyncExitStack mathematically guarantees that child processes are killed 
-        # when the main server shuts down, preventing Concurrency Zombies.
         self.exit_stack = AsyncExitStack()
         self.sessions: Dict[str, ClientSession] = {}
         self._cached_tools: List[Dict[str, Any]] = []
         
+        # --- ARCHITECTURAL UPGRADE: The Tool Router ---
+        # Maps tool_name -> server_name (e.g., "fetch_youtube_transcript" -> "YouTubeScraper")
+        self._tool_to_server: Dict[str, str] = {}
+        
         self._initialized = False
         self._init_lock = asyncio.Lock()
 
+        # The Server Registry: Add new MCP scripts here to plug them into the Swarm
+        self.server_registry = {
+            "LocalSystem": "app/mcp_servers/local_system.py",
+            "YouTubeScraper": "app/mcp_servers/youtube_scraper.py"
+        }
+
     async def _init_peripherals(self):
-        """
-        Lazy-loads the child processes. We only spin them up the first time 
-        the Swarm asks for them, saving RAM on server boot.
-        """
+        """Lazy-loads all child processes defined in the registry."""
         if not MCP_AVAILABLE:
             return
             
@@ -44,86 +49,83 @@ class EnterpriseMCPManager:
             if self._initialized:
                 return
 
-            logger.info("Powering up LocalSystem MCP Peripheral...")
-            try:
-                # 1. Define the command to spawn the child process
-                # sys.executable ensures we use the exact same Python env that FastAPI is using
-                server_params = StdioServerParameters(
-                    command=sys.executable, 
-                    args=["app/mcp_servers/local_system.py"]
-                )
-                
-                # 2. Open the I/O pipes using the Exit Stack (ensures clean shutdown)
-                transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
-                read_stream, write_stream = transport
-                
-                # 3. Establish the MCP JSON-RPC Session over the standard I/O pipes
-                session = await self.exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-                await session.initialize()
-                
-                # Register the active session
-                self.sessions["LocalSystem"] = session
-                
-                # 4. Ask the server: "What tools do you have?"
-                tools_response = await session.list_tools()
-                
-                # 5. Translate MCP schema into the strict OpenAI/Groq function-calling schema
-                for tool in tools_response.tools:
-                    self._cached_tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.inputSchema
-                        }
-                    })
+            logger.info("Powering up Peripheral Nervous System...")
+            
+            # Boot every server in our registry simultaneously
+            for server_name, script_path in self.server_registry.items():
+                try:
+                    logger.info(f"Booting MCP Server: {server_name}...")
+                    server_params = StdioServerParameters(
+                        command=sys.executable, 
+                        args=[script_path]
+                    )
                     
-                self._initialized = True
-                logger.info(f"MCP Peripheral Online. Discovered {len(self._cached_tools)} dynamic tools.")
-                
-            except Exception as e:
-                logger.error(f"Failed to initialize MCP Peripheral: {e}")
+                    transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+                    read_stream, write_stream = transport
+                    
+                    session = await self.exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
+                    await session.initialize()
+                    
+                    self.sessions[server_name] = session
+                    
+                    # Ask the server: "What tools do you have?"
+                    tools_response = await session.list_tools()
+                    
+                    # Map the tools and cache them
+                    for tool in tools_response.tools:
+                        self._tool_to_server[tool.name] = server_name
+                        self._cached_tools.append({
+                            "type": "function",
+                            "function": {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": tool.inputSchema
+                            }
+                        })
+                except Exception as e:
+                    logger.error(f"Failed to initialize MCP Server {server_name}: {e}")
+                    
+            self._initialized = True
+            logger.info(f"MCP Peripheral Online. Discovered {len(self._cached_tools)} total dynamic tools.")
         
     async def get_dynamic_tools(self) -> List[Dict[str, Any]]:
         """Provides the tool manifest to the Swarm Orchestrator."""
         if not MCP_AVAILABLE:
             return []
-            
         await self._init_peripherals()
         return self._cached_tools
 
     async def execute_dynamic_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
-        """Routes the execution payload to the correct child process."""
+        """Routes the execution payload to the exact child process that owns the tool."""
         if not MCP_AVAILABLE:
             return f"Error: MCP subsystem offline."
             
         await self._init_peripherals()
         
-        session = self.sessions.get("LocalSystem")
+        # 1. Find which server owns this tool
+        server_name = self._tool_to_server.get(tool_name)
+        if not server_name:
+            return f"Error: Tool '{tool_name}' is not registered to any active MCP server."
+            
+        # 2. Get that server's active communication pipe
+        session = self.sessions.get(server_name)
         if not session:
-            return "Error: MCP Session disconnected."
+            return f"Error: MCP Session for '{server_name}' disconnected."
             
         try:
-            logger.info(f"Executing MCP Tool '{tool_name}' with args: {arguments}")
-            # Send the execution request over the pipe to the child script
+            logger.info(f"Routing '{tool_name}' to Server '{server_name}'...")
             result = await session.call_tool(tool_name, arguments)
-            
-            # The result content is a list of blocks. Extract the text components.
             text_outputs = [c.text for c in result.content if hasattr(c, 'text')]
             return "\n".join(text_outputs)
             
         except Exception as e:
-            logger.error(f"Peripheral execution failed for {tool_name}: {e}")
+            logger.error(f"Peripheral execution failed for {tool_name} on {server_name}: {e}")
             return f"Peripheral Error: {str(e)}"
 
     async def shutdown(self):
-        """Cleanly terminates the child processes."""
         if self._initialized:
             logger.info("Terminating MCP Peripheral connections...")
             await self.exit_stack.aclose()
             self._initialized = False
 
-# --- ARCHITECTURAL FIX: THE GLOBAL SINGLETON ---
-# We instantiate the manager exactly ONCE here, so the entire app shares the same connection pipes.
-# This completely eliminates the "Zombie" process bug.
 global_mcp_manager = EnterpriseMCPManager()
