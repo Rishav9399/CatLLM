@@ -1,11 +1,16 @@
 @import "tailwindcss";
 
-/* We discard the default light/dark schema. 
-  This environment exists ONLY in absolute darkness.
-*/
 :root {
-  --background: #030303;
-  --foreground: #e5e5e5;
+  --background: #050508;
+  --foreground: #e8e8f0;
+  --accent-primary: #818cf8;
+  --accent-secondary: #6366f1;
+  --accent-glow: rgba(129, 140, 248, 0.4);
+  --border-bright: rgba(129, 140, 248, 0.3);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-dim: rgba(255, 255, 255, 0.04);
+  --glass-bg: rgba(12, 12, 20, 0.7);
+  --glass-light: rgba(255, 255, 255, 0.04);
 }
 
 @theme inline {
@@ -18,28 +23,120 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  /* The layout.tsx applies the font variables, so we do not need generic fallbacks here */
 }
 
 /* =========================================
-   ARCHITECTURAL POLISH
+   ATMOSPHERIC TEXT SELECTION
    ========================================= */
-
-/* 1. Atmospheric Text Selection */
 ::selection {
-  background-color: rgba(49, 46, 129, 0.4); /* Matches our indigo volumetric light */
+  background-color: rgba(99, 102, 241, 0.35);
   color: #ffffff;
 }
 
-/* 2. Global Scrollbar Eradication 
-   We hide the ugly native scrollbars everywhere to maintain the illusion 
-   that this is a solid pane of glass, not a browser window.
-*/
+/* =========================================
+   SCROLLBAR — VISIBLE BUT ELEGANT
+   ========================================= */
 ::-webkit-scrollbar {
-  display: none; /* Chrome, Safari and Opera */
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 248, 0.2);
+  border-radius: 2px;
+  transition: background 0.3s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(129, 140, 248, 0.45);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 140, 248, 0.2) transparent;
 }
 
-* {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;     /* Firefox */
+/* =========================================
+   GLOBAL ANIMATIONS
+   ========================================= */
+
+@keyframes fadeUp {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.99); filter: blur(3px); }
+  100% { opacity: 1; transform: translateY(0)    scale(1);    filter: blur(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to   { transform: rotate(0deg); }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { transform: scale(1);   opacity: 0.6; }
+  50%       { transform: scale(1.05); opacity: 1; }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes gradient-flow {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Utility classes for animations */
+.animate-fade-up        { animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) forwards; }
+.animate-spin-slow      { animation: spin-slow 12s linear infinite; }
+.animate-spin-reverse   { animation: spin-reverse 18s linear infinite; }
+.animate-pulse-ring     { animation: pulse-ring 3s ease-in-out infinite; }
+.animate-blink-cursor   { animation: blink-cursor 1s step-start infinite; }
+.animate-gradient-flow  { animation: gradient-flow 6s ease infinite; background-size: 200% 200%; }
+
+/* Shimmer text effect */
+.shimmer-text {
+  background: linear-gradient(90deg, #818cf8 0%, #c4b5fd 30%, #818cf8 60%, #6366f1 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s linear infinite;
+}
+
+/* Glowing edge border */
+.glow-border {
+  box-shadow:
+    0 0 0 1px rgba(129, 140, 248, 0.25),
+    0 0 15px rgba(129, 140, 248, 0.1),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.glow-border-active {
+  box-shadow:
+    0 0 0 1px rgba(129, 140, 248, 0.5),
+    0 0 30px rgba(129, 140, 248, 0.2),
+    0 0 60px rgba(99, 102, 241, 0.1),
+    inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+/* Glass panel */
+.glass-panel {
+  background: rgba(12, 12, 22, 0.75);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
 }

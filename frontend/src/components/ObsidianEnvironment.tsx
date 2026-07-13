@@ -123,26 +123,35 @@ export default function ObsidianEnvironment() {
   }, [isStreaming, sessionId, patch]);
 
   return (
-    <div className="relative w-full h-screen bg-[#030303] overflow-hidden font-sans text-[#e5e5e5] selection:bg-indigo-900/40 flex">
+    <div className="relative w-full h-screen bg-[#050508] overflow-hidden font-sans text-[#e8e8f0] flex">
 
-      {/* Toast notifications (document uploads etc.) */}
+      {/* Toast notifications */}
       <Toaster
         position="bottom-right"
         toastOptions={{
           style: {
-            background: '#111',
-            color: '#e5e5e5',
-            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(12,12,22,0.95)',
+            color: '#c7d2fe',
+            border: '1px solid rgba(129,140,248,0.25)',
+            borderRadius: '10px',
             fontSize: '12px',
             fontFamily: 'monospace',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 0 20px rgba(99,102,241,0.15)',
+          },
+          success: {
+            iconTheme: { primary: '#818cf8', secondary: '#050508' },
+          },
+          error: {
+            iconTheme: { primary: '#f87171', secondary: '#050508' },
           },
         }}
       />
 
-      {/* The Breathing Background — sits behind everything */}
+      {/* The Breathing Background */}
       <AtmosphericLight phase={currentPhase} />
 
-      {/* Sidebar — real sessions, frosted glass */}
+      {/* Sidebar */}
       <div className="relative z-20 h-full shrink-0">
         <Sidebar
           activeSessionId={sessionId}
@@ -152,10 +161,11 @@ export default function ObsidianEnvironment() {
       </div>
 
       {/* Main chat column */}
-      <div className="relative z-10 flex-1 flex items-center justify-center p-6 md:p-12 min-w-0">
+      <div className="relative z-10 flex-1 flex items-center justify-center p-4 md:p-8 min-w-0">
         <ObsidianSlab phase={currentPhase}>
           <MessageThread messages={messages} />
-          <div className="w-full h-px bg-gradient-to-r from-transparent via-white/[0.03] to-transparent" />
+          {/* Divider with visible glow */}
+          <div className="mx-5 shrink-0" style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(129,140,248,0.18), transparent)' }} />
           <MachinedComposer onSend={handleInteraction} isStreaming={isStreaming} />
         </ObsidianSlab>
       </div>

@@ -1,5 +1,7 @@
+"use client";
+
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Paperclip, X } from 'lucide-react';
+import { Paperclip, X, ArrowUp, Loader2 } from 'lucide-react';
 import { uploadImage } from '@/lib/api';
 import toast from 'react-hot-toast';
 
@@ -10,11 +12,30 @@ interface MachinedComposerProps {
 
 export const MachinedComposer: React.FC<MachinedComposerProps> = ({ onSend, isStreaming }) => {
   const [input, setInput] = useState('');
+  const [isFocused, setIsFocused] = useState(false);
   const [stagedImage, setStagedImage] = useState<File | null>(null);
   const [stagedPreview, setStagedPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isActive = !isStreaming && !isUploading;
+  const hasContent = input.trim().length > 0;
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }, [input]);
+
+  // Auto-focus
+  useEffect(() => {
+    if (isActive && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isActive]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -34,19 +55,20 @@ export const MachinedComposer: React.FC<MachinedComposerProps> = ({ onSend, isSt
     setStagedPreview(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isStreaming || isUploading) return;
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!hasContent || !isActive) return;
 
-    let attachments: string[] | undefined = undefined;
-    
+    let attachments: string[] | undefined;
+
     if (stagedImage) {
       setIsUploading(true);
       try {
         const { file_path } = await uploadImage(stagedImage);
         attachments = [file_path];
-      } catch (err: any) {
-        toast.error(err.message || 'Image upload failed.');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Image upload failed.';
+        toast.error(msg);
         setIsUploading(false);
         return;
       }
@@ -58,95 +80,151 @@ export const MachinedComposer: React.FC<MachinedComposerProps> = ({ onSend, isSt
     removeStagedImage();
   };
 
-  // Auto-focus the structural command line
-  useEffect(() => {
-    if (!isStreaming && inputRef.current) {
-      inputRef.current.focus();
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
     }
-  }, [isStreaming]);
+  };
+
+  const borderColor = isFocused
+    ? 'rgba(129,140,248,0.55)'
+    : hasContent
+    ? 'rgba(129,140,248,0.3)'
+    : 'rgba(255,255,255,0.08)';
+
+  const boxShadow = isFocused
+    ? '0 0 0 1px rgba(129,140,248,0.4), 0 0 30px rgba(99,102,241,0.15), inset 0 1px 0 rgba(255,255,255,0.06)'
+    : hasContent
+    ? '0 0 0 1px rgba(129,140,248,0.2), 0 0 15px rgba(99,102,241,0.07)'
+    : '0 0 0 1px rgba(255,255,255,0.05)';
 
   return (
-    <div className="px-8 md:px-12 pb-8 pt-4 w-full max-w-4xl mx-auto shrink-0 flex flex-col gap-3">
-      
-      {/* Staging Area */}
+    <div className="px-5 pb-5 pt-3 w-full max-w-4xl mx-auto shrink-0 flex flex-col gap-3">
+
+      {/* Staged image preview */}
       {stagedPreview && (
-        <div className="bg-white/[0.02] border border-white/[0.05] rounded-lg p-2 flex items-center gap-3 w-fit self-start ml-12">
-           <img src={stagedPreview} alt="Staged" className="w-12 h-12 object-cover rounded-md opacity-80" />
-           <button 
-             onClick={removeStagedImage} 
-             type="button"
-             className="p-1 hover:bg-white/[0.05] rounded-full text-gray-500 hover:text-white transition-colors"
-           >
-             <X size={14} />
-           </button>
+        <div className="flex items-center gap-3 px-2 animate-fade-up">
+          <div className="relative group w-fit">
+            <img
+              src={stagedPreview}
+              alt="Staged"
+              className="w-14 h-14 object-cover rounded-lg border border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.2)]"
+            />
+            <button
+              onClick={removeStagedImage}
+              type="button"
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-900 border border-white/10 flex items-center justify-center text-gray-400 hover:text-red-400 hover:border-red-400/40 transition-colors"
+            >
+              <X size={10} />
+            </button>
+          </div>
+          <span className="text-[10px] text-gray-600 font-mono tracking-wider">
+            {stagedImage?.name}
+          </span>
         </div>
       )}
-      
-      {/* 
-        Notice: NO background color, NO border radius, NO box shadow on the form.
-        It is purely a typographic input layer resting on the glass.
-      */}
-      <form 
-        onSubmit={handleSubmit} 
-        className="relative flex items-center group cursor-text"
-        onClick={() => inputRef.current?.focus()}
+
+      {/* Composer panel */}
+      <div
+        className="relative rounded-xl transition-all duration-300"
+        style={{
+          background: 'rgba(10, 10, 20, 0.85)',
+          border: `1px solid ${borderColor}`,
+          boxShadow,
+          backdropFilter: 'blur(20px)',
+        }}
       >
-        
-        {/* The Prompt Block (Replaces the Paperclip) 
-            Acts as a physical cursor resting state, showing system readiness.
-        */}
-        <div className="w-4 shrink-0 flex flex-col items-center pt-0.5 mr-6">
-          <div className={`w-2 h-3 transition-all duration-700 ${
-            isStreaming || isUploading ? 'bg-gray-700' : 'bg-indigo-400/80 shadow-[0_0_12px_rgba(129,140,248,0.5)] animate-pulse'
-          }`} />
+        {/* Top edge glow when focused */}
+        <div
+          className="absolute top-0 left-6 right-6 h-px rounded-full transition-opacity duration-500"
+          style={{
+            background: 'linear-gradient(90deg, transparent, rgba(129,140,248,0.5), transparent)',
+            opacity: isFocused ? 1 : 0,
+          }}
+        />
+
+        <div className="flex items-end gap-3 px-4 py-3">
+
+          {/* Attach button */}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!isActive}
+            className="shrink-0 mb-0.5 p-1.5 rounded-lg text-gray-600 hover:text-indigo-400 hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Attach image"
+          >
+            <Paperclip size={15} strokeWidth={1.5} />
+          </button>
+
+          {/* Textarea */}
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            disabled={!isActive}
+            placeholder={
+              isStreaming
+                ? 'Generating response…'
+                : isUploading
+                ? 'Uploading image…'
+                : 'Ask anything… (Shift+Enter for new line)'
+            }
+            className="flex-1 bg-transparent py-1 text-[13.5px] text-gray-100 placeholder-gray-600 tracking-[0.015em] font-light focus:outline-none resize-none leading-relaxed disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ minHeight: '24px', maxHeight: '160px' }}
+          />
+
+          {/* Send / Loading button */}
+          <button
+            type="button"
+            onClick={() => handleSubmit()}
+            disabled={!hasContent || !isActive}
+            className={`shrink-0 mb-0.5 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${
+              isStreaming
+                ? 'bg-indigo-900/40 border border-indigo-600/30 cursor-not-allowed'
+                : hasContent && isActive
+                ? 'bg-indigo-600 hover:bg-indigo-500 border border-indigo-400/50 shadow-[0_0_20px_rgba(99,102,241,0.4)] hover:shadow-[0_0_30px_rgba(99,102,241,0.6)] hover:scale-110 active:scale-95'
+                : 'bg-gray-800/50 border border-white/[0.05] opacity-40 cursor-not-allowed'
+            }`}
+          >
+            {isStreaming || isUploading ? (
+              <Loader2 size={14} className="text-indigo-400 animate-spin" />
+            ) : (
+              <ArrowUp size={14} className="text-white" strokeWidth={2} />
+            )}
+          </button>
         </div>
 
-        {/* The Paperclip */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isStreaming || isUploading}
-          className="p-1.5 mr-3 text-gray-500 hover:text-gray-300 transition-colors disabled:opacity-50"
-        >
-          <Paperclip size={16} strokeWidth={1.5} />
-        </button>
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={fileInputRef} 
-          onChange={handleFileSelect} 
-        />
-
-        {/* The Typographic Input Layer */}
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={isStreaming || isUploading}
-          placeholder={isStreaming || isUploading ? "" : "Initiate synthesis sequence..."}
-          className="flex-1 bg-transparent py-2 text-[14px] text-gray-100 placeholder-gray-500 tracking-[0.02em] font-light focus:outline-none disabled:opacity-50"
-        />
-        
-        {/* 
-          The Action Node (Replaces the giant Send Button)
-          It is completely invisible until the user types, maintaining the void.
-          When it appears, it is a microscopic crosshair/plus, not a paper airplane.
-        */}
-        <button
-          type="submit"
-          disabled={!input.trim() || isStreaming || isUploading}
-          className={`ml-4 p-1.5 flex items-center justify-center transition-all duration-500 ${
-            input.trim() && !(isStreaming || isUploading) 
-              ? 'opacity-100 text-gray-400 hover:text-white' 
-              : 'opacity-0 text-gray-800 pointer-events-none'
-          }`}
-        >
-          <Plus size={16} strokeWidth={1} className={input.trim() && !(isStreaming || isUploading) ? "rotate-90 transition-transform duration-700" : ""} />
-        </button>
-
-      </form>
+        {/* Bottom helper row */}
+        <div className="flex items-center justify-between px-4 pb-2.5 pt-0">
+          <span className="text-[9px] text-gray-700 font-mono tracking-wider">
+            {isStreaming ? (
+              <span className="text-indigo-500/70 flex items-center gap-1.5">
+                <span className="inline-block w-1 h-1 rounded-full bg-indigo-500 animate-ping" />
+                Streaming…
+              </span>
+            ) : (
+              'Enter to send  ·  Shift+Enter for new line'
+            )}
+          </span>
+          <span className={`text-[9px] font-mono transition-all duration-300 ${
+            input.length > 800 ? 'text-orange-400' : 'text-gray-700'
+          }`}>
+            {input.length > 0 ? `${input.length} chars` : ''}
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
